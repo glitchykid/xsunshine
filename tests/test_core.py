@@ -1,6 +1,6 @@
 import unittest
 
-from xsunshine.core import Snapshot, prune
+from xsunshine.core import Result, Snapshot, prune
 
 
 class MemoryTree:
@@ -27,6 +27,20 @@ class MemoryTree:
 
 
 class PruningTests(unittest.TestCase):
+    def test_supplied_result_retains_real_deletions_after_interrupt(self):
+        tree = self.tree()
+        progress = Result()
+
+        def interrupt(event):
+            if event.action == "deleted":
+                raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            prune(tree, "root", apply=True, emit=interrupt, result=progress)
+        self.assertEqual(progress.deleted, 1)
+        self.assertEqual(progress.candidates, 1)
+        self.assertEqual(tree.deleted, ["b"])
+
     def tree(self):
         return MemoryTree(
             {

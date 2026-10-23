@@ -15,6 +15,7 @@ from xsunshine import __version__
 from xsunshine.core import Event, Result, prune
 from xsunshine.filesystem import DirectoryTree
 from xsunshine.registry import RegistryTree, normalize_registry_path
+from xsunshine.terminal import Terminal
 
 
 def fixed_drives() -> list[str]:
@@ -81,6 +82,12 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--apply", action="store_true", help="perform the deletions")
     command.add_argument("--trace", metavar="FILE", help="write diagnostic JSONL to a new file")
     command.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="terminal colors (default: auto; honors NO_COLOR)",
+    )
+    command.add_argument(
         "--verbose", action="store_true", help="also print visits and retained items"
     )
     return command
@@ -100,10 +107,11 @@ def main(argv: list[str] | None = None) -> int:
         registries = outermost([normalize_registry_path(key) for key in args.registry], "\\")
     except ValueError as exc:
         command.error(str(exc))
-    total = Result()
+    totals = {}
     mode = "APPLY" if args.apply else "PREVIEW"
     try:
         with ExitStack() as resources:
+            terminal = resources.enter_context(Terminal(sys.stdout, args.color))
             log = (
                 resources.enter_context(Path(args.trace).open("x", encoding="utf-8"))
                 if args.trace
@@ -128,7 +136,8 @@ def main(argv: list[str] | None = None) -> int:
                     # becoming terminal commands or misleading extra lines.
                     name = json.dumps(event.path, ensure_ascii=True)
                     detail = " " + json.dumps(event.detail) if event.detail else ""
-                    print(f"{event.action.upper()} {event.kind} {name}{detail}")
+                    label = terminal.paint(event.action, event.action.upper())
+                    print(f"{label} {event.kind} {name}{detail}", flush=True)
 
             if args.all:
                 directories = fixed_drives()
@@ -146,16 +155,50 @@ def main(argv: list[str] | None = None) -> int:
                     "views": views,
                 }
             )
-            print(f"XSunshine {__version__} | {mode}")
-            for tree in trees:
-                result = prune(tree, str(tree.root), apply=args.apply, emit=emit)
-                for field in fields(total):
-                    setattr(
-                        total, field.name, getattr(total, field.name) + getattr(result, field.name)
-                    )
-            record({"action": "summary", "mode": mode, **asdict(total)})
-            print(" ".join(f"{key}={value}" for key, value in asdict(total).items()))
-        return 1 if total.errors else 0
+            print(terminal.paint("header", f"XSunshine {__version__} | {mode}"), flush=True)
+            status, exit_code = "completed", 0
+            try:
+                for tree in trees:
+                    progress = totals.setdefault(tree.kind, Result())
+                    prune(tree, str(tree.root), apply=args.apply, emit=emit, result=progress)
+            except KeyboardInterrupt:
+                status, exit_code = "interrupted", 130
+                print("Interrupted; completed deletions remain applied.", file=sys.stderr)
+            except (OSError, ValueError) as exc:
+                status, exit_code = "failed", 1
+                print(f"xsunshine: {exc}", file=sys.stderr)
+
+            total = Result(
+                **{
+                    field.name: sum(getattr(row, field.name) for row in totals.values())
+                    for field in fields(Result)
+                }
+            )
+            if total.errors and status == "completed":
+                status, exit_code = "incomplete", 1
+            labels = {
+                "directory": "Directories",
+                "registry32": "Registry (32-bit)",
+                "registry64": "Registry (64-bit)",
+            }
+
+            def counts(result):
+                return " ".join(f"{key}={value}" for key, value in asdict(result).items())
+
+            for kind, row in totals.items():
+                print(f"{labels[kind]}: {counts(row)}")
+            suffix = f", {status}" if status != "completed" else ""
+            print(terminal.paint("total", f"TOTAL ({mode}{suffix}): {counts(total)}"), flush=True)
+            record(
+                {
+                    "action": "summary",
+                    "mode": mode,
+                    "status": status,
+                    "by_kind": {kind: asdict(row) for kind, row in totals.items()},
+                    **asdict(total),
+                }
+            )
+        return exit_code
     except KeyboardInterrupt:
         print("Interrupted; completed deletions remain applied.", file=sys.stderr)
         return 130

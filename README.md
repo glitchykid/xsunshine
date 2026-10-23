@@ -64,6 +64,18 @@ The launcher preserves the caller's working directory. Set `XSUNSHINE_PYTHON` to
 
 `--trace FILE` writes a new JSON Lines file containing visits, decisions, errors, and a final summary. Existing files are never overwritten. `--verbose` prints visits and retained objects as well as candidates, deletions, and errors.
 
+Live statuses use cyan for candidates, green for deletions, yellow for skips, and red for errors. Colors are automatic in supported terminals, including Windows consoles; redirected output stays plain. Use `--color always` to force colors or `--color never` to disable them. Automatic mode honors `NO_COLOR` and `TERM=dumb`. JSONL logs never include color codes.
+
+Every scan finishes with directory and registry-view breakdowns and a combined total:
+
+```text
+Directories: visited=3 candidates=2 deleted=2 skipped=0 errors=0
+Registry (64-bit): visited=2 candidates=1 deleted=1 skipped=0 errors=0
+TOTAL (APPLY): visited=5 candidates=3 deleted=3 skipped=0 errors=0
+```
+
+Totals add the counters across all selected scopes. Preview totals count projected candidates; apply totals distinguish candidates from successful deletions. Interrupted or incomplete runs identify that status and retain the counts already recorded. Registry counts are per view, so shared branches can be counted in both previews. The JSONL summary includes the same breakdown in `by_kind` and a completion `status`.
+
 Exit codes: `0` completed without errors (intentional skips may remain), `1` incomplete due to errors, `2` invalid arguments, and `130` interrupted. Already completed deletions remain applied after an interruption.
 
 ## Repository structure
@@ -97,4 +109,4 @@ Tests create temporary directories and uniquely named keys under `HKCU\Software\
 
 ## Releases
 
-[v0.2.0](docs/releases/v0.2.0.md) introduces the terminal application. See [published releases](https://github.com/glitchykid/xsunshine/releases) and the [wiki](https://github.com/glitchykid/xsunshine/wiki) for usage and publishing guidance. The earlier [v0.1.0](docs/releases/v0.1.0.md) milestone contained documentation only.
+[v0.3.0](docs/releases/v0.3.0.md) adds live colors and final totals. [v0.2.0](docs/releases/v0.2.0.md) introduced the terminal application. See [published releases](https://github.com/glitchykid/xsunshine/releases) and the [wiki](https://github.com/glitchykid/xsunshine/wiki) for usage and publishing guidance.

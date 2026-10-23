@@ -22,6 +22,8 @@ Use TDD: write a failing test, implement the minimum passing code, then refactor
 
 Build a Windows-focused terminal application. Choose technologies for platform fit and maintainability; Python with a PowerShell launcher is the selected approach.
 
+Use colors to distinguish live terminal statuses. End each run with calculated totals and category breakdowns, including partial progress after interruption. Keep redirected output and diagnostic logs readable without color codes.
+
 Recursively clean empty filesystem directories and registry keys throughout the system; registry cleanup is required. Process children before parents so newly empty parents are eligible immediately. Preserve files and registry values. Provide preview and explicit apply modes, retain scope roots, and report skipped or inaccessible objects. Test destructive behavior only in isolated fixtures.
 
 ## Graphical Interfaces

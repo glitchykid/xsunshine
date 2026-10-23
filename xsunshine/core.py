@@ -47,13 +47,16 @@ def prune(
     *,
     apply: bool = False,
     emit: Callable[[Event], None] = lambda event: None,
+    result: Result | None = None,
 ) -> Result:
     """Prune descendants; the explicit scope root is always retained.
 
     Preview models removal of children so parents are reported in the same pass.
     Apply rechecks every object and delegates only non-recursive removal.
+    A supplied result retains progress if traversal is interrupted.
     """
-    result = Result()
+    if result is None:
+        result = Result()
     removed: set[str] = set()
     stack: list[tuple[str, Snapshot | None]] = [(root, None)]
     while stack:
