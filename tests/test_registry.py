@@ -49,9 +49,34 @@ class RegistryPathTests(unittest.TestCase):
         self.assertEqual(normalize_registry_path("hklm"), "HKLM")
 
     def test_invalid_paths_are_rejected(self):
-        for value in ["", "C:\\", "HKBOGUS", "HKCU\\..", "HKCU\\\\Software", "HKCU\x00"]:
+        for value in [
+            "",
+            "C:\\",
+            "HKBOGUS",
+            "HKCU:Software",
+            "HKCU:",
+            "HKCU\\\\Software",
+            "HKCU\x00",
+        ]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 normalize_registry_path(value)
+
+    def test_absolute_powershell_paths_and_trailing_separators_are_normalized(self):
+        for value in [
+            "HKCU:\\Software\\",
+            r"Registry::HKEY_CURRENT_USER\Software",
+            r"registry::hkey_current_user\Software",
+            "HKCU\\Software\\",
+        ]:
+            with self.subTest(value=value):
+                self.assertEqual(normalize_registry_path(value), r"HKCU\Software")
+        self.assertEqual(normalize_registry_path("HKLM:\\"), "HKLM")
+
+    def test_printable_key_names_are_literal(self):
+        for name in [".", "..", "a/b", " spaced [name] "]:
+            path = "HKCU\\Software\\" + name
+            with self.subTest(name=name):
+                self.assertEqual(normalize_registry_path(path), path)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows registry integration")
@@ -110,6 +135,25 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(result.errors, 0)
         self.assertEqual(result.deleted, 3)
         self.assertFalse(self.exists("parent"))
+
+    def test_literal_dot_slash_and_spaced_keys_do_not_abort_cleanup(self):
+        names = [".", "..", "a/b", " spaced [name] "]
+        for name in names:
+            self.make(name + r"\leaf")
+        self.make("keep", "value")
+        result = prune(self.tree, self.root, apply=True)
+        self.assertEqual(result.deleted, 8)
+        self.assertEqual(result.errors, 0)
+        self.assertTrue(self.exists("keep"))
+
+    def test_powershell_scope_cannot_escape_literal_dot_key(self):
+        self.make("..")
+        self.make(r"sibling\empty")
+        root = "HKCU:\\" + self.key_path + "\\..\\"
+        tree = RegistryTree(root, "64")
+        result = prune(tree, tree.root, apply=True)
+        self.assertEqual(result.deleted, 0)
+        self.assertTrue(self.exists(r"sibling\empty"))
 
     def test_preview_preserves_keys(self):
         self.make(r"parent\leaf")

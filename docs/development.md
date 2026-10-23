@@ -8,6 +8,8 @@ The current versions are Python 3.15.1, PowerShell 7.6.8, Ruff 0.17.2, and setup
 
 `cli.py` selects scopes and reports events. `core.py` performs iterative post-order traversal through a small `Tree` protocol. `filesystem.py` and `registry.py` define emptiness and perform non-recursive deletion. Preview simulates removed descendants; apply rechecks objects before removal. Scope roots remain traversal boundaries.
 
+Registry path normalization accepts absolute hive and PowerShell provider syntax without treating key names as filesystem paths. Dot and slash names remain literal. Filesystem enumeration tolerates entries that disappear before inspection; final emptiness checks remain authoritative. The engine distinguishes reporting failures from per-object access errors: reporting failures propagate immediately to stop cleanup, while progress already recorded remains available to the terminal summary.
+
 Registry deletion uses a short transaction per candidate. A private temporary value acquires the write lock, is removed, and then emptiness is checked again before deletion commits. The initial emptiness check preserves any existing values, including names resembling the internal marker. Failure rolls back; extra write permissions and Windows transaction support are required. The test suite verifies the marker is invisible to other handles and that competing writes cannot silently lose a value in the tested race.
 
 ## Tracer-bullet development and TDD
@@ -23,5 +25,6 @@ Run the commands in the [README](../README.md). Destructive integration tests mu
 - [Python 3.15 filesystem APIs](https://docs.python.org/3.15/library/os.html), [registry APIs](https://docs.python.org/3.15/library/winreg.html), [ctypes](https://docs.python.org/3.15/library/ctypes.html), [argparse](https://docs.python.org/3.15/library/argparse.html), and [unittest](https://docs.python.org/3.15/library/unittest.html).
 - [RegOpenKeyExW](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenkeyexw), [RegOpenKeyTransactedW](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenkeytransactedw), [RegDeleteKeyTransactedW](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regdeletekeytransactedw), and [CreateTransaction](https://learn.microsoft.com/en-us/windows/win32/api/ktmw32/nf-ktmw32-createtransaction).
 - [PowerShell 7.6 automatic variables](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables?view=powershell-7.6).
+- [Windows registry key naming](https://learn.microsoft.com/en-us/windows/win32/sysinfo/structure-of-the-registry) and [PowerShell registry provider paths](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_registry_provider?view=powershell-7.6).
 - [Ruff configuration](https://docs.astral.sh/ruff/configuration/) and [setuptools package configuration](https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html).
 - [The Pragmatic Programmer authors' tips](https://books.pragprog.com/tips/), including tracer bullets.

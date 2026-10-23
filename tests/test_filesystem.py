@@ -3,12 +3,42 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from xsunshine.core import prune
 from xsunshine.filesystem import DirectoryTree
 
 
 class DirectoryTests(unittest.TestCase):
+    def test_disappearing_file_does_not_block_empty_sibling(self):
+        vanished = self.root / "vanished.txt"
+        vanished.touch()
+        (self.root / "empty").mkdir()
+        with os.scandir(self.root) as entries:
+            stale_entries = list(entries)
+        vanished.unlink()
+        vanished_entry = MagicMock(path=str(vanished))
+        vanished_entry.stat.side_effect = FileNotFoundError(str(vanished))
+        stale_entries = [
+            vanished_entry if entry.name == vanished.name else entry for entry in stale_entries
+        ]
+        real_scandir = os.scandir
+        first = True
+
+        def changing_directory(path):
+            nonlocal first
+            if first and Path(path) == self.root:
+                first = False
+                context = MagicMock()
+                context.__enter__.return_value = iter(stale_entries)
+                return context
+            return real_scandir(path)
+
+        with patch("xsunshine.filesystem.os.scandir", side_effect=changing_directory):
+            result = prune(self.tree, str(self.root), apply=True)
+        self.assertEqual(result.errors, 0)
+        self.assertEqual(result.deleted, 1)
+
     def setUp(self):
         self.fixture = tempfile.TemporaryDirectory(prefix="xsunshine-test-")
         self.addCleanup(self.fixture.cleanup)

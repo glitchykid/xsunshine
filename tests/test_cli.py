@@ -15,6 +15,63 @@ from xsunshine.cli import fixed_drives, main
 
 
 class CommandTests(unittest.TestCase):
+    def test_trace_write_failure_stops_before_later_deletions_and_reports_totals(self):
+        class FailingTrace(io.StringIO):
+            failed = False
+
+            def write(self, text):
+                event = json.loads(text)
+                if (
+                    not self.failed
+                    and event["action"] == "visit"
+                    and event["path"].endswith("leaf")
+                ):
+                    self.failed = True
+                    raise OSError("Trace disk is full")
+                return super().write(text)
+
+            def close(self):
+                self.saved = self.getvalue()
+                super().close()
+
+        sibling = self.scope / "zz-other"
+        sibling.mkdir()
+        trace = FailingTrace()
+        with patch("xsunshine.cli.Path.open", return_value=trace):
+            code, output, errors = self.invoke(
+                "--path", str(self.scope), "--apply", "--trace", "test.jsonl"
+            )
+        self.assertEqual(code, 1)
+        self.assertTrue(sibling.exists())
+        self.assertIn("Trace disk is full", errors)
+        self.assertIn("TOTAL (APPLY, failed):", output)
+        summary = json.loads(trace.saved.splitlines()[-1])
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["deleted"], 0)
+        self.assertEqual(summary["errors"], 0)
+
+    def test_powershell_registry_aliases_are_deduplicated_before_scanning(self):
+        from xsunshine.core import Snapshot
+
+        class RegistryFixture:
+            def __init__(self, root, view):
+                self.root, self.kind = root, "registry" + view
+
+            def inspect(self, node):
+                return Snapshot((), False)
+
+        with patch("xsunshine.cli.RegistryTree", side_effect=RegistryFixture) as factory:
+            code, _, _ = self.invoke(
+                "--registry",
+                "HKCU:\\Software\\",
+                "--registry",
+                r"Registry::HKEY_CURRENT_USER\Software",
+                "--registry-view",
+                "64",
+            )
+        self.assertEqual(code, 0)
+        factory.assert_called_once_with(r"HKCU\Software", "64")
+
     def setUp(self):
         fixture = tempfile.TemporaryDirectory(prefix="xsunshine-cli-")
         self.addCleanup(fixture.cleanup)

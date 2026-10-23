@@ -34,7 +34,12 @@ class DirectoryTree:
         has_files = False
         with os.scandir(path) as entries:
             for entry in entries:
-                entry_info = entry.stat(follow_symlinks=False)
+                try:
+                    entry_info = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    # A disappearing entry must not abandon the whole directory.
+                    # Later inspection and non-recursive deletion still recheck it.
+                    continue
                 if (
                     stat.S_ISDIR(entry_info.st_mode)
                     or stat.S_ISLNK(entry_info.st_mode)

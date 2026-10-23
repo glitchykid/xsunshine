@@ -29,12 +29,20 @@ def _owned_key(handle):
 
 
 def normalize_registry_path(value: str) -> str:
-    parts = value.split("\\")
-    hive = parts[0].upper()
+    if value.casefold().startswith("registry::"):
+        value = value[len("Registry::") :]
+    hive, separator, tail = value.partition("\\")
+    if separator:
+        hive = hive.removesuffix(":")
+    hive = hive.upper()
+    tail = tail.rstrip("\\")
+    parts = tail.split("\\") if tail else []
     hive = next((short for short, full in HIVES.items() if hive == full), hive)
-    if hive not in HIVES or "\x00" in value or any(part in ("", ".", "..") for part in parts[1:]):
-        raise ValueError("Use a registry path such as HKCU\\Software or HKLM")
-    return "\\".join([hive, *parts[1:]])
+    if hive not in HIVES or "\x00" in value or any(part == "" for part in parts):
+        raise ValueError("Use an absolute registry path such as HKCU\\Software or HKCU:\\Software")
+    # Registry keys are literal names, not filesystem paths: '.' and '..'
+    # must not be rejected or resolved to a parent key.
+    return "\\".join([hive, *parts])
 
 
 class RegistryAPI:

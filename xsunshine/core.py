@@ -33,6 +33,10 @@ class Skipped(Exception):
     """A link or changed object must remain untouched."""
 
 
+class ReportingError(RuntimeError):
+    """Reporting is unavailable; stop traversal rather than hiding lost output."""
+
+
 class Tree(Protocol):
     kind: str
 
@@ -57,6 +61,14 @@ def prune(
     """
     if result is None:
         result = Result()
+
+    def report(event):
+        try:
+            emit(event)
+        except OSError as exc:
+            # Keep output failures out of the per-object access-error handler.
+            raise ReportingError(f"Unable to report cleanup progress: {exc}") from exc
+
     removed: set[str] = set()
     stack: list[tuple[str, Snapshot | None]] = [(root, None)]
     while stack:
@@ -65,31 +77,31 @@ def prune(
             current = tree.inspect(node)
             if before is None:
                 result.visited += 1
-                emit(Event("visit", tree.kind, node))
+                report(Event("visit", tree.kind, node))
                 stack.append((node, current))
                 stack.extend((child, None) for child in reversed(current.children))
                 continue
             if current.identity != before.identity:
                 raise Skipped("Object changed during traversal")
             if node == root:
-                emit(Event("keep", tree.kind, node, "Scope root"))
+                report(Event("keep", tree.kind, node, "Scope root"))
                 continue
             if current.has_content or any(child not in removed for child in current.children):
-                emit(Event("keep", tree.kind, node, "Contains content or retained children"))
+                report(Event("keep", tree.kind, node, "Contains content or retained children"))
                 continue
             result.candidates += 1
             if apply:
                 if not tree.remove_empty(node, before.identity):
                     raise Skipped("No longer empty or changed before deletion")
                 result.deleted += 1
-                emit(Event("deleted", tree.kind, node))
+                report(Event("deleted", tree.kind, node))
             else:
-                emit(Event("candidate", tree.kind, node))
+                report(Event("candidate", tree.kind, node))
             removed.add(node)
         except Skipped as exc:
             result.skipped += 1
-            emit(Event("skip", tree.kind, node, str(exc)))
+            report(Event("skip", tree.kind, node, str(exc)))
         except OSError as exc:
             result.errors += 1
-            emit(Event("error", tree.kind, node, str(exc)))
+            report(Event("error", tree.kind, node, str(exc)))
     return result

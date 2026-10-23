@@ -27,6 +27,38 @@ class MemoryTree:
 
 
 class PruningTests(unittest.TestCase):
+    def test_reporting_failure_stops_scan_instead_of_becoming_access_error(self):
+        from xsunshine.core import ReportingError
+
+        tree = self.tree()
+        progress = Result()
+
+        def fail_once(event):
+            if event.action == "visit" and event.path == "b":
+                raise OSError("Trace disk is full")
+
+        with self.assertRaisesRegex(ReportingError, "Trace disk is full"):
+            prune(tree, "root", apply=True, emit=fail_once, result=progress)
+        self.assertEqual(progress.deleted, 0)
+        self.assertEqual(progress.errors, 0)
+        self.assertEqual(tree.deleted, [])
+
+    def test_reporting_failure_after_delete_preserves_completed_count(self):
+        from xsunshine.core import ReportingError
+
+        tree = self.tree()
+        progress = Result()
+
+        def fail_on_delete(event):
+            if event.action == "deleted":
+                raise OSError("Output unavailable")
+
+        with self.assertRaises(ReportingError):
+            prune(tree, "root", apply=True, emit=fail_on_delete, result=progress)
+        self.assertEqual(progress.deleted, 1)
+        self.assertEqual(progress.errors, 0)
+        self.assertEqual(tree.deleted, ["b"])
+
     def test_supplied_result_retains_real_deletions_after_interrupt(self):
         tree = self.tree()
         progress = Result()

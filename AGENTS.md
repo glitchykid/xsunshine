@@ -8,6 +8,8 @@ Separate application code, tests, assets, and documentation following language c
 
 Act as a senior developer. Follow DRY, KISS, pragmatic SOLID, and YAGNI: avoid duplication, keep solutions simple, justify abstractions, and implement only what is needed. Ask questions to clarify requirements, assumptions, and consequential decisions.
 
+Prioritize reliability and Windows usability in ongoing development. Use reproduced failures and small, tested improvements to guide the next increment.
+
 Use tracer-bullet development from *The Pragmatic Programmer*: build a small working slice through all layers, validate it end to end, and extend it through feedback. Keep these slices as production code with tests and error handling. Diagnostic logging is a separate concern.
 
 Use only the latest stable technologies. Before writing code, consult official documentation for the exact version used; verify current stable releases instead of relying on remembered APIs.

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from xsunshine import __version__
-from xsunshine.core import Event, Result, prune
+from xsunshine.core import Event, ReportingError, Result, prune
 from xsunshine.filesystem import DirectoryTree
 from xsunshine.registry import RegistryTree, normalize_registry_path
 from xsunshine.terminal import Terminal
@@ -68,7 +68,7 @@ def parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="KEY",
-        help=r"registry scope, e.g. HKCU\Software; repeat as needed",
+        help=r"registry scope, e.g. HKCU\Software or HKCU:\Software; repeat as needed",
     )
     command.add_argument(
         "--all", action="store_true", help="all local fixed volumes and loaded HKLM/HKU hives"
@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             except KeyboardInterrupt:
                 status, exit_code = "interrupted", 130
                 print("Interrupted; completed deletions remain applied.", file=sys.stderr)
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, ReportingError) as exc:
                 status, exit_code = "failed", 1
                 print(f"xsunshine: {exc}", file=sys.stderr)
 
