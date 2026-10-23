@@ -1,0 +1,153 @@
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest.mock import patch
+
+from xsunshine import __version__
+from xsunshine.cli import fixed_drives, main
+
+
+class CommandTests(unittest.TestCase):
+    def setUp(self):
+        fixture = tempfile.TemporaryDirectory(prefix="xsunshine-cli-")
+        self.addCleanup(fixture.cleanup)
+        self.root = Path(fixture.name)
+        self.scope = self.root / "scope"
+        (self.scope / "parent" / "leaf").mkdir(parents=True)
+
+    def invoke(self, *args):
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            result = main(list(args))
+        return result, output.getvalue(), errors.getvalue()
+
+    def test_default_is_preview(self):
+        code, output, _ = self.invoke("--path", str(self.scope))
+        self.assertEqual(code, 0)
+        self.assertIn("PREVIEW", output)
+        self.assertIn("candidates=2", output)
+        self.assertTrue((self.scope / "parent" / "leaf").exists())
+
+    def test_explicit_apply_deletes_recursively(self):
+        code, output, _ = self.invoke("--path", str(self.scope), "--apply")
+        self.assertEqual(code, 0)
+        self.assertIn("deleted=2", output)
+        self.assertEqual(list(self.scope.iterdir()), [])
+
+    def test_missing_path_returns_failure(self):
+        code, output, _ = self.invoke("--path", str(self.root / "missing"))
+        self.assertEqual(code, 1)
+        self.assertIn("errors=1", output)
+
+    def test_overlapping_paths_are_scanned_once(self):
+        code, output, _ = self.invoke(
+            "--path", str(self.scope / "parent"), "--path", str(self.scope)
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("candidates=2", output)
+
+    def test_trace_contains_visits_candidates_and_summary(self):
+        trace = self.root / "events.jsonl"
+        code, _, _ = self.invoke("--path", str(self.scope), "--trace", str(trace))
+        self.assertEqual(code, 0)
+        records = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(records[0]["action"], "start")
+        self.assertIn("visit", [record["action"] for record in records])
+        self.assertEqual(records[-1]["action"], "summary")
+        self.assertEqual(records[-1]["candidates"], 2)
+
+    def test_existing_trace_is_not_overwritten_and_no_deletions_occur(self):
+        trace = self.root / "events.jsonl"
+        trace.write_text("keep", encoding="utf-8")
+        code, _, _ = self.invoke("--path", str(self.scope), "--apply", "--trace", str(trace))
+        self.assertEqual(code, 1)
+        self.assertEqual(trace.read_text(encoding="utf-8"), "keep")
+        self.assertTrue((self.scope / "parent" / "leaf").exists())
+
+    def test_no_scope_and_invalid_registry_are_usage_errors(self):
+        for args in [
+            [],
+            ["--registry", "BAD"],
+            ["--registry", "HKCU", "--registry-view", "16"],
+            ["--all", "--path", str(self.scope)],
+        ]:
+            with (
+                self.subTest(args=args),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as error,
+            ):
+                main(args)
+            self.assertEqual(error.exception.code, 2)
+
+    def test_version_needs_no_scope(self):
+        with redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit) as error:
+            main(["--version"])
+        self.assertEqual(error.exception.code, 0)
+        self.assertIn(__version__, output.getvalue())
+
+    def test_all_selects_fixed_drives_and_loaded_hives_in_both_views(self):
+        class EmptyTree:
+            def __init__(self, root, view):
+                self.root = root
+                self.kind = "registry" + view
+
+        from xsunshine.core import Result
+
+        with (
+            patch("xsunshine.cli.fixed_drives", return_value=[str(self.scope)]),
+            patch("xsunshine.cli.RegistryTree", side_effect=EmptyTree) as registry,
+            patch("xsunshine.cli.prune", return_value=Result()) as scanner,
+        ):
+            code, _, _ = self.invoke("--all")
+        self.assertEqual(code, 0)
+        self.assertEqual(scanner.call_count, 5)
+        self.assertEqual(
+            {call.args for call in registry.call_args_list},
+            {("HKLM", "32"), ("HKLM", "64"), ("HKU", "32"), ("HKU", "64")},
+        )
+
+    def test_interrupt_returns_130(self):
+        with patch("xsunshine.cli.prune", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.invoke("--path", str(self.scope))[0], 130)
+
+    @unittest.skipUnless(os.name == "nt", "Windows volume discovery")
+    def test_system_discovery_includes_volumes_without_drive_letters_once(self):
+        from unittest.mock import Mock
+
+        drive_type = Mock(return_value=3)
+        native = Mock(GetDriveTypeW=drive_type)
+        mounts = {"volume-c": ["C:\\"], "volume-mounted": ["C:\\mount\\"], "volume-hidden": []}
+        with (
+            patch("xsunshine.cli.ctypes.WinDLL", return_value=native),
+            patch("xsunshine.cli.os.listdrives", return_value=["C:\\"]),
+            patch("xsunshine.cli.os.listvolumes", return_value=list(mounts)),
+            patch("xsunshine.cli.os.listmounts", side_effect=mounts.__getitem__),
+        ):
+            self.assertEqual(fixed_drives(), ["C:\\", "volume-mounted", "volume-hidden"])
+
+    @unittest.skipUnless(shutil.which("pwsh"), "PowerShell 7 launcher integration")
+    def test_powershell_launcher_preserves_caller_directory_and_arguments(self):
+        launcher = Path(__file__).resolve().parents[1] / "xsunshine.ps1"
+        environment = {**os.environ, "XSUNSHINE_PYTHON": sys.executable}
+        process = subprocess.run(
+            ["pwsh", "-NoProfile", "-File", str(launcher), "--path", "scope", "--apply"],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        self.assertIn("deleted=2", process.stdout)
+        self.assertEqual(list(self.scope.iterdir()), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

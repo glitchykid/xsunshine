@@ -1,0 +1,92 @@
+"""Iterative post-order pruning shared by filesystem and registry backends."""
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    children: tuple[str, ...]
+    has_content: bool
+    identity: object = None
+
+
+@dataclass(frozen=True)
+class Event:
+    action: str
+    kind: str
+    path: str
+    detail: str = ""
+
+
+@dataclass
+class Result:
+    visited: int = 0
+    candidates: int = 0
+    deleted: int = 0
+    skipped: int = 0
+    errors: int = 0
+
+
+class Skipped(Exception):
+    """A link or changed object must remain untouched."""
+
+
+class Tree(Protocol):
+    kind: str
+
+    def inspect(self, node: str) -> Snapshot: ...
+
+    def remove_empty(self, node: str, identity: object) -> bool: ...
+
+
+def prune(
+    tree: Tree,
+    root: str,
+    *,
+    apply: bool = False,
+    emit: Callable[[Event], None] = lambda event: None,
+) -> Result:
+    """Prune descendants; the explicit scope root is always retained.
+
+    Preview models removal of children so parents are reported in the same pass.
+    Apply rechecks every object and delegates only non-recursive removal.
+    """
+    result = Result()
+    removed: set[str] = set()
+    stack: list[tuple[str, Snapshot | None]] = [(root, None)]
+    while stack:
+        node, before = stack.pop()
+        try:
+            current = tree.inspect(node)
+            if before is None:
+                result.visited += 1
+                emit(Event("visit", tree.kind, node))
+                stack.append((node, current))
+                stack.extend((child, None) for child in reversed(current.children))
+                continue
+            if current.identity != before.identity:
+                raise Skipped("Object changed during traversal")
+            if node == root:
+                emit(Event("keep", tree.kind, node, "Scope root"))
+                continue
+            if current.has_content or any(child not in removed for child in current.children):
+                emit(Event("keep", tree.kind, node, "Contains content or retained children"))
+                continue
+            result.candidates += 1
+            if apply:
+                if not tree.remove_empty(node, before.identity):
+                    raise Skipped("No longer empty or changed before deletion")
+                result.deleted += 1
+                emit(Event("deleted", tree.kind, node))
+            else:
+                emit(Event("candidate", tree.kind, node))
+            removed.add(node)
+        except Skipped as exc:
+            result.skipped += 1
+            emit(Event("skip", tree.kind, node, str(exc)))
+        except OSError as exc:
+            result.errors += 1
+            emit(Event("error", tree.kind, node, str(exc)))
+    return result

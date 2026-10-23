@@ -1,37 +1,37 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Structure & Commands
 
-Follow the chosen framework's layout. Suggested directories are `src/` for application code, `tests/` for tests, `assets/` for static resources, and `docs/` for documentation. Create directories only when needed and describe the actual structure in `README.md`.
-
-## Build, Test, and Development Commands
-
-Document prerequisites and exact installation, run, build, and test commands in `README.md`. Keep them synchronized with scripts and configuration. Run relevant checks before committing; report any checks that could not run.
+Separate application code, tests, assets, and documentation following language conventions. Document the actual layout, prerequisites, and exact installation, run, build, lint, and test commands in `README.md`. Run relevant checks before committing and report anything not run.
 
 ## Development Approach
 
-Act as a senior developer. Follow DRY, KISS, pragmatic SOLID, and YAGNI: avoid duplication, keep solutions simple, justify abstractions, and implement only what is needed. Develop using the trace method. Ask questions to clarify requirements, assumptions, and consequential design decisions.
+Act as a senior developer. Follow DRY, KISS, pragmatic SOLID, and YAGNI: avoid duplication, keep solutions simple, justify abstractions, and implement only what is needed. Ask questions to clarify requirements, assumptions, and consequential decisions.
 
-Use only the latest stable versions of technologies. Before writing code, consult official documentation for the exact version being used. Verify stable releases rather than relying on remembered APIs or outdated examples.
+Use tracer-bullet development from *The Pragmatic Programmer*: build a small working slice through all layers, validate it end to end, and extend it through feedback. Keep these slices as production code with tests and error handling. Diagnostic logging is a separate concern.
 
-## Coding Style & Naming Conventions
+Use only the latest stable technologies. Before writing code, consult official documentation for the exact version used; verify current stable releases instead of relying on remembered APIs.
 
-Follow language conventions and configure formatting and linting with the first source files. Use consistent indentation, descriptive names, and modules with a single responsibility. Avoid unrelated formatting changes.
+## Coding & Testing
 
-## Testing Guidelines
+Use consistent indentation, descriptive names, and modules with a single responsibility. Configure formatting and linting alongside the first implementation; avoid unrelated formatting changes.
 
-Use TDD: write a failing test, implement the minimum code to pass it, then refactor while keeping tests green. Test thoroughly, including boundary values, unexpected or invalid inputs, empty values, and error paths. Add regression tests for bug fixes. Document the runner and any coverage requirements; name tests after observable behavior.
+Use TDD: write a failing test, implement the minimum passing code, then refactor with tests green. Test thoroughly, including boundary values, unexpected or invalid inputs, empty values, and error paths. Add regression tests for fixes. Name tests after observable behavior and document the runner and coverage requirements.
 
-## Graphical Interface Design
+## Application Requirements
 
-Minimize whitespace while preserving readability and usability. Before implementing a graphical interface, show the user a visual mockup or design preview. Obtain agreement on the design before building the interface.
+Build a Windows-focused terminal application. Choose technologies for platform fit and maintainability; Python with a PowerShell launcher is the selected approach.
 
-## Commit & Pull Request Guidelines
+Recursively clean empty filesystem directories and registry keys throughout the system; registry cleanup is required. Process children before parents so newly empty parents are eligible immediately. Preserve files and registry values. Provide preview and explicit apply modes, retain scope roots, and report skipped or inaccessible objects. Test destructive behavior only in isolated fixtures.
 
-Commit and push every meaningful, validated change to the configured remote. Use focused commits with imperative subjects such as `Add project configuration`. Pull requests should explain the purpose, link relevant issues, report validation and setup changes, and include screenshots for interface changes.
+## Graphical Interfaces
 
-## Documentation, Releases & Persistent Instructions
+If a graphical interface is introduced, minimize whitespace while preserving readability and usability. Show a visual preview and obtain the user's agreement before implementation.
 
-Maintain the README and project wiki as the project evolves. Publish release pages for meaningful milestones, with version tags, changes, validation results, and known limitations. Clearly distinguish documentation milestones from runnable application releases.
+## Commits, Documentation & Releases
+
+Commit and push every meaningful, validated change. Use focused, imperative subjects such as `Add cleanup command`. Pull requests should explain purpose, link issues, report validation and setup changes, and show screenshots for interface changes.
+
+Maintain the README and wiki. Publish release pages for meaningful milestones with version tags, changes, validation, and limitations; distinguish documentation milestones from runnable releases.
 
 Add every user suggestion and instruction to this file, consolidating overlapping rules. Keep guidance general and reusable; exclude repository URLs.

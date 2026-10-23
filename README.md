@@ -1,41 +1,100 @@
 # XSunshine
 
-XSunshine is in the repository setup stage. This milestone establishes contributor guidance, project documentation, and the release process. Application requirements and the technology stack have not yet been defined.
+XSunshine is a Windows terminal application that recursively removes empty filesystem directories and empty registry keys. It visits children before parents, so a parent made empty by cleanup can be removed in the same run.
 
-## Current status
+## Requirements
 
-- Contributor requirements are recorded in [AGENTS.md](AGENTS.md).
-- The [project wiki](https://github.com/glitchykid/xsunshine/wiki) covers development and publishing.
-- [Release pages](https://github.com/glitchykid/xsunshine/releases) record published milestones.
-- Application code, a graphical interface, automated tests, and executable downloads are not available yet.
+- Windows and the latest stable [Python](https://www.python.org/downloads/windows/) (developed and tested with **3.15.1**, 64-bit).
+- The optional launcher uses the latest stable [PowerShell](https://github.com/PowerShell/PowerShell/releases/latest) (tested with **7.6.8**).
+- No third-party runtime dependencies. Python handles traversal and Windows APIs directly; PowerShell only launches the application.
 
 ## Getting started
 
-Git is the only prerequisite for this documentation milestone.
-
-```sh
+```powershell
 git clone https://github.com/glitchykid/xsunshine.git
 cd xsunshine
+python -m xsunshine --help
 ```
 
-Read [AGENTS.md](AGENTS.md) before making changes. There are no dependency installation, build, local run, or test commands yet. Add exact prerequisites and commands here when the application toolchain is introduced.
+Preview a chosen directory or registry branch:
+
+```powershell
+python -m xsunshine --path 'C:\Example'
+python -m xsunshine --registry 'HKCU\Software' --registry-view both
+```
+
+Apply cleanup by adding `--apply`. Repeat `--path` and `--registry` to combine explicit scopes:
+
+```powershell
+python -m xsunshine --path 'C:\Example' --apply
+```
+
+For system-wide discovery and cleanup:
+
+```powershell
+python -m xsunshine --all
+python -m xsunshine --all --apply --trace cleanup.trace.jsonl
+```
+
+`--all` covers local fixed volumes, including volumes without drive letters, plus loaded `HKLM` and `HKU` hives in both registry views. The current user's hive is included under `HKU`; merged aliases such as `HKCR` are not scanned again. Offline user hives are not loaded. Network and removable locations can be supplied explicitly with `--path`. Use an elevated terminal when access to system-owned locations is needed; access failures are reported without changing permissions.
+
+Empty directories and keys can still be expected by installed software. Review the preview before applying. Deletions are permanent and diagnostic logs are not backups.
+
+## Cleanup rules
+
+| Object | Behavior |
+| --- | --- |
+| Empty directory | Eligible after its removable descendants are processed. |
+| Directory containing a file | Retained, including hidden and zero-byte files. Empty child directories remain eligible. |
+| Empty registry key | Eligible only with zero subkeys and zero values. |
+| Empty string, binary, or zero-valued registry entry | Preserved; an existing value makes its key nonempty. |
+| Scope root or hive root | Retained. Overlapping scopes are reduced to the outermost root. |
+| Junction, symbolic link, or other reparse point | Skipped, including links inside explicitly supplied paths. |
+| Inaccessible or concurrently changed object | Reported; other branches continue. |
+
+Directory deletion uses non-recursive `rmdir`, which refuses nonempty directories. Registry deletion rechecks emptiness under a Windows transaction and rolls back on failure; there is no nontransactional fallback. Avoid moving or replacing scanned trees while a run is in progress. Preview counts are projections and can change before apply. Shared registry branches can appear in both view previews.
+
+## PowerShell launcher and diagnostics
+
+```powershell
+pwsh -NoProfile -File .\xsunshine.ps1 --path 'C:\Example'
+```
+
+The launcher preserves the caller's working directory. Set `XSUNSHINE_PYTHON` to a Python executable if `python` is not on `PATH`. You can also run `python run.py` from a checkout, or install with `python -m pip install .` to use the `xsunshine` command.
+
+`--trace FILE` writes a new JSON Lines file containing visits, decisions, errors, and a final summary. Existing files are never overwritten. `--verbose` prints visits and retained objects as well as candidates, deletions, and errors.
+
+Exit codes: `0` completed without errors (intentional skips may remain), `1` incomplete due to errors, `2` invalid arguments, and `130` interrupted. Already completed deletions remain applied after an interruption.
 
 ## Repository structure
 
 | Path | Purpose |
 | --- | --- |
 | `AGENTS.md` | General contributor and agent instructions, including user requirements. |
-| `README.md` | Project status, setup, and documentation entry point. |
+| `xsunshine/` | Terminal interface, shared pruning engine, filesystem and registry adapters. |
+| `tests/` | Standard-library unit and isolated Windows integration tests. |
+| `run.py`, `xsunshine.ps1` | Checkout launchers. |
+| `pyproject.toml` | Package metadata, pinned development tooling, and Ruff configuration. |
+| `docs/development.md` | Architecture, tracer-bullet workflow, and API references. |
 | `docs/releases/` | Versioned release notes used for GitHub release pages. |
 
 The wiki has its own Git repository; see the [development guide](https://github.com/glitchykid/xsunshine/wiki/Development).
 
-## Contributing
+## Development and validation
 
-Follow the development, testing, and interface approval requirements in [AGENTS.md](AGENTS.md). Validate each meaningful change, commit it, and push it to the configured remote. Update the README and wiki when behavior or setup changes, and publish release notes for meaningful milestones.
+Follow [AGENTS.md](AGENTS.md). Use TDD and tracer-bullet development: deliver a working path from terminal input through the Windows adapter to observable results, then extend it with tested behavior.
 
-For documentation changes, review Markdown rendering, check links and stated commands, and run `git diff --check`. Application changes will require the test suite established with the implementation.
+```powershell
+python -m unittest discover -s tests -v
+python -m pip install --group dev
+python -m ruff check .
+python -m ruff format --check .
+python -m pip wheel . --no-deps --wheel-dir dist
+git diff --check
+```
+
+Tests create temporary directories and uniquely named keys under `HKCU\Software\XSunshine.Tests.<uuid>`, then remove those fixtures. They never invoke system-wide deletion. The suite covers recursive previews and deletion, retained values/files, deep trees, links, races, rollback, argument validation, and the PowerShell launcher. There is no numerical coverage threshold; every changed behavior requires relevant tests.
 
 ## Releases
 
-The initial `v0.1.0` milestone contains documentation only. See its [release notes](docs/releases/v0.1.0.md) for scope and validation, and the wiki's [release guide](https://github.com/glitchykid/xsunshine/wiki/Releases) for the publishing process.
+[v0.2.0](docs/releases/v0.2.0.md) introduces the terminal application. See [published releases](https://github.com/glitchykid/xsunshine/releases) and the [wiki](https://github.com/glitchykid/xsunshine/wiki) for usage and publishing guidance. The earlier [v0.1.0](docs/releases/v0.1.0.md) milestone contained documentation only.
