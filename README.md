@@ -80,7 +80,7 @@ TOTAL (APPLY): visited=5 candidates=3 deleted=3 skipped=0 errors=0
 
 Totals add the counters across all selected scopes. Preview totals count projected candidates; apply totals distinguish candidates from successful deletions. Interrupted or incomplete runs identify that status and retain the counts already recorded. Registry counts are per view, so shared branches can be counted in both previews. The JSONL summary includes the same breakdown in `by_kind` and a completion `status`.
 
-A terminal or trace-write failure stops further cleanup and marks the run as failed. Completed deletions remain counted; the terminal prints partial totals when output is still available. A failed trace file may be incomplete. Reporting failures are separate from per-object access errors in the counters.
+A terminal or trace-write failure stops further cleanup and marks the run as failed. Completed deletions remain counted. If standard output fails, plain partial totals go to standard error and the JSONL summary is still attempted. If writing the final trace summary fails, standard error prints corrected totals marked `failed`, even if a normal total was already printed. A failed trace file may be incomplete. Reporting failures are separate from per-object access errors in the counters. Closing an output pipe exits with code `1` without a Python shutdown traceback.
 
 Exit codes: `0` completed without errors (intentional skips may remain), `1` incomplete due to errors, `2` invalid arguments, and `130` interrupted. Already completed deletions remain applied after an interruption.
 
@@ -115,4 +115,4 @@ Tests create temporary directories and uniquely named keys under `HKCU\Software\
 
 ## Releases
 
-[v0.3.1](docs/releases/v0.3.1.md) improves registry path handling and reliability during filesystem changes or reporting failures. [v0.3.0](docs/releases/v0.3.0.md) added live colors and final totals. See [published releases](https://github.com/glitchykid/xsunshine/releases) and the [wiki](https://github.com/glitchykid/xsunshine/wiki) for usage and publishing guidance.
+[v0.3.2](docs/releases/v0.3.2.md) preserves partial summaries across output failures and handles closed output pipes cleanly. [v0.3.1](docs/releases/v0.3.1.md) improved registry path handling and filesystem reliability. See [published releases](https://github.com/glitchykid/xsunshine/releases) and the [wiki](https://github.com/glitchykid/xsunshine/wiki) for usage and publishing guidance.

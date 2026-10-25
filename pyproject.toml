@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xsunshine"
-version = "0.3.1"
+version = "0.3.2"
 description = "Terminal cleanup of empty Windows directories and registry keys"
 readme = "README.md"
 requires-python = ">=3.15"
 dependencies = []
 
 [project.scripts]
-xsunshine = "xsunshine.cli:main"
+xsunshine = "xsunshine.cli:entrypoint"
 
 [dependency-groups]
 dev = ["ruff==0.17.2"]

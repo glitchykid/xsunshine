@@ -117,6 +117,22 @@ def main(argv: list[str] | None = None) -> int:
                 if args.trace
                 else None
             )
+            output_failed = False
+
+            def display(text):
+                nonlocal output_failed
+                try:
+                    print(text, flush=True)
+                except OSError, ValueError:
+                    output_failed = True
+                    raise
+
+            def diagnose(text):
+                try:
+                    print(text, file=sys.stderr, flush=True)
+                except OSError, ValueError:
+                    # A broken diagnostic stream must not prevent the trace summary.
+                    pass
 
             def record(data):
                 if log:
@@ -137,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
                     name = json.dumps(event.path, ensure_ascii=True)
                     detail = " " + json.dumps(event.detail) if event.detail else ""
                     label = terminal.paint(event.action, event.action.upper())
-                    print(f"{label} {event.kind} {name}{detail}", flush=True)
+                    display(f"{label} {event.kind} {name}{detail}")
 
             if args.all:
                 directories = fixed_drives()
@@ -155,18 +171,18 @@ def main(argv: list[str] | None = None) -> int:
                     "views": views,
                 }
             )
-            print(terminal.paint("header", f"XSunshine {__version__} | {mode}"), flush=True)
             status, exit_code = "completed", 0
             try:
+                display(terminal.paint("header", f"XSunshine {__version__} | {mode}"))
                 for tree in trees:
                     progress = totals.setdefault(tree.kind, Result())
                     prune(tree, str(tree.root), apply=args.apply, emit=emit, result=progress)
             except KeyboardInterrupt:
                 status, exit_code = "interrupted", 130
-                print("Interrupted; completed deletions remain applied.", file=sys.stderr)
+                diagnose("Interrupted; completed deletions remain applied.")
             except (OSError, ValueError, ReportingError) as exc:
                 status, exit_code = "failed", 1
-                print(f"xsunshine: {exc}", file=sys.stderr)
+                diagnose(f"xsunshine: {exc}")
 
             total = Result(
                 **{
@@ -185,19 +201,38 @@ def main(argv: list[str] | None = None) -> int:
             def counts(result):
                 return " ".join(f"{key}={value}" for key, value in asdict(result).items())
 
-            for kind, row in totals.items():
-                print(f"{labels[kind]}: {counts(row)}")
-            suffix = f", {status}" if status != "completed" else ""
-            print(terminal.paint("total", f"TOTAL ({mode}{suffix}): {counts(total)}"), flush=True)
-            record(
-                {
-                    "action": "summary",
-                    "mode": mode,
-                    "status": status,
-                    "by_kind": {kind: asdict(row) for kind, row in totals.items()},
-                    **asdict(total),
-                }
-            )
+            rows = [f"{labels[kind]}: {counts(row)}" for kind, row in totals.items()]
+
+            def total_line():
+                suffix = f", {status}" if status != "completed" else ""
+                return f"TOTAL ({mode}{suffix}): {counts(total)}"
+
+            if not output_failed:
+                try:
+                    for row in rows:
+                        display(row)
+                    display(terminal.paint("total", total_line()))
+                except (OSError, ValueError) as exc:
+                    status, exit_code = "failed", 1
+                    diagnose(f"xsunshine: {exc}")
+            trace_failed = False
+            try:
+                record(
+                    {
+                        "action": "summary",
+                        "mode": mode,
+                        "status": status,
+                        "by_kind": {kind: asdict(row) for kind, row in totals.items()},
+                        **asdict(total),
+                    }
+                )
+            except (OSError, ValueError) as exc:
+                status, exit_code = "failed", 1
+                trace_failed = True
+                diagnose(f"xsunshine: {exc}")
+            if output_failed or trace_failed:
+                # Keep the fallback plain even when stdout colors were forced.
+                diagnose("\n".join([*rows, total_line()]))
         return exit_code
     except KeyboardInterrupt:
         print("Interrupted; completed deletions remain applied.", file=sys.stderr)
@@ -207,5 +242,26 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def entrypoint() -> int:
+    """Flush CLI streams before shutdown so a broken pipe keeps the exit status."""
+    code = main()
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            continue
+        try:
+            stream.flush()
+        except OSError, ValueError:
+            # Python otherwise retries the buffered write during shutdown and
+            # replaces our exit status with 120. Redirect only the failed stream.
+            try:
+                with open(os.devnull, "w") as sink:
+                    os.dup2(sink.fileno(), stream.fileno())
+            except OSError, ValueError:
+                setattr(sys, name, None)
+            code = code or 1
+    return code
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(entrypoint())

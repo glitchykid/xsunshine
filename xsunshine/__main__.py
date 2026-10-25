@@ -1,3 +1,3 @@
-from xsunshine.cli import main
+from xsunshine.cli import entrypoint
 
-raise SystemExit(main())
+raise SystemExit(entrypoint())

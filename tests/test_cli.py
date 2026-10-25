@@ -15,6 +15,155 @@ from xsunshine.cli import fixed_drives, main
 
 
 class CommandTests(unittest.TestCase):
+    def test_broken_stdout_preserves_trace_summary_and_prints_plain_totals_to_stderr(self):
+        class BrokenOutput(io.StringIO):
+            failed = False
+
+            def write(self, text):
+                if "DELETED" in text:
+                    self.failed = True
+                if self.failed:
+                    raise BrokenPipeError("Output pipe closed")
+                return super().write(text)
+
+        trace = self.root / "broken-output.jsonl"
+        errors = io.StringIO()
+        with redirect_stdout(BrokenOutput()), redirect_stderr(errors):
+            code = main(
+                [
+                    "--path",
+                    str(self.scope),
+                    "--apply",
+                    "--trace",
+                    str(trace),
+                    "--color",
+                    "always",
+                ]
+            )
+        self.assertEqual(code, 1)
+        self.assertTrue((self.scope / "parent").exists())
+        self.assertFalse((self.scope / "parent" / "leaf").exists())
+        self.assertIn("TOTAL (APPLY, failed): visited=3 candidates=1 deleted=1", errors.getvalue())
+        self.assertNotIn("\x1b", errors.getvalue())
+        summary = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["deleted"], 1)
+
+    def test_total_output_failure_keeps_failed_summary_in_trace(self):
+        class BrokenOutput(io.StringIO):
+            def write(self, text):
+                if "TOTAL" in text:
+                    raise BrokenPipeError("Output pipe closed")
+                return super().write(text)
+
+        trace = self.root / "broken-total.jsonl"
+        errors = io.StringIO()
+        with redirect_stdout(BrokenOutput()), redirect_stderr(errors):
+            code = main(["--path", str(self.scope), "--trace", str(trace)])
+        self.assertEqual(code, 1)
+        self.assertIn("TOTAL (PREVIEW, failed):", errors.getvalue())
+        summary = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["candidates"], 2)
+
+    def test_command_with_closed_output_pipe_exits_cleanly_with_partial_totals(self):
+        launcher = Path(__file__).resolve().parents[1] / "run.py"
+        for index, command in enumerate((["-m", "xsunshine"], [str(launcher)])):
+            with self.subTest(command=command):
+                trace = self.root / f"closed-pipe-{index}.jsonl"
+                read_fd, write_fd = os.pipe()
+                os.close(read_fd)
+                try:
+                    process = subprocess.run(
+                        [
+                            sys.executable,
+                            *command,
+                            "--path",
+                            str(self.scope),
+                            "--apply",
+                            "--trace",
+                            str(trace),
+                        ],
+                        stdout=write_fd,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=30,
+                    )
+                finally:
+                    os.close(write_fd)
+                self.assertEqual(process.returncode, 1, process.stderr)
+                self.assertNotIn("Exception ignored", process.stderr)
+                self.assertIn("TOTAL (APPLY, failed):", process.stderr)
+                summary = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+                self.assertEqual(summary["status"], "failed")
+                self.assertTrue((self.scope / "parent" / "leaf").exists())
+
+    def test_final_trace_failure_reports_failed_totals(self):
+        class FailingSummary(io.StringIO):
+            def write(self, text):
+                if json.loads(text)["action"] == "summary":
+                    raise OSError("Trace disk is full")
+                return super().write(text)
+
+        with patch("xsunshine.cli.Path.open", return_value=FailingSummary()):
+            code, output, errors = self.invoke("--path", str(self.scope), "--trace", "test.jsonl")
+        self.assertEqual(code, 1)
+        self.assertIn("Trace disk is full", errors)
+        self.assertIn("TOTAL (PREVIEW, failed): visited=3 candidates=2", errors)
+
+    def test_unavailable_terminal_streams_still_write_zero_progress_to_trace(self):
+        for failure in (BrokenPipeError("Closed pipe"), ValueError("Closed stream")):
+            with self.subTest(failure=type(failure).__name__):
+                trace = self.root / (type(failure).__name__ + ".jsonl")
+                with (
+                    patch("sys.stdout.write", side_effect=failure),
+                    patch("sys.stderr.write", side_effect=failure),
+                ):
+                    code = main(["--path", str(self.scope), "--apply", "--trace", str(trace)])
+                self.assertEqual(code, 1)
+                self.assertTrue((self.scope / "parent" / "leaf").exists())
+                summary = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+                self.assertEqual(summary["status"], "failed")
+                self.assertEqual(summary["visited"], 0)
+                self.assertEqual(summary["deleted"], 0)
+
+    def test_total_flush_failure_reports_failed_status_to_remaining_channels(self):
+        class FailedFlush(io.StringIO):
+            def flush(self):
+                if "TOTAL" in self.getvalue():
+                    raise OSError("Cannot flush output")
+
+        trace = self.root / "flush.jsonl"
+        errors = io.StringIO()
+        with redirect_stdout(FailedFlush()), redirect_stderr(errors):
+            code = main(["--path", str(self.scope), "--trace", str(trace)])
+        self.assertEqual(code, 1)
+        self.assertIn("TOTAL (PREVIEW, failed):", errors.getvalue())
+        summary = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["candidates"], 2)
+
+    def test_persistent_trace_failure_preserves_partial_totals(self):
+        class FullTrace(io.StringIO):
+            failed = False
+
+            def write(self, text):
+                if json.loads(text)["action"] == "deleted":
+                    self.failed = True
+                if self.failed:
+                    raise OSError("Trace disk is full")
+                return super().write(text)
+
+        with patch("xsunshine.cli.Path.open", return_value=FullTrace()):
+            code, output, errors = self.invoke(
+                "--path", str(self.scope), "--apply", "--trace", "test.jsonl"
+            )
+        self.assertEqual(code, 1)
+        self.assertTrue((self.scope / "parent").exists())
+        self.assertFalse((self.scope / "parent" / "leaf").exists())
+        for stream in (output, errors):
+            self.assertIn("TOTAL (APPLY, failed): visited=3 candidates=1 deleted=1", stream)
+
     def test_trace_write_failure_stops_before_later_deletions_and_reports_totals(self):
         class FailingTrace(io.StringIO):
             failed = False
